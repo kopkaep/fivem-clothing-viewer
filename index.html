@@ -196,12 +196,17 @@ async function addZip(f){
   get:async()=>{const d=fflate.unzipSync(u8,{filter:z=>z.name===n})[n];return d.buffer.slice(d.byteOffset,d.byteOffset+d.byteLength)}}));
 }
 async function addArc(f){
- const B='https://cdn.jsdelivr.net/npm/libarchive.js@2.0.2/dist/';
- const {Archive}=await import(B+'libarchive.js');
- if(!window._la){const w=await (await fetch(B+'worker-bundle.js')).text();Archive.init({workerUrl:URL.createObjectURL(new Blob([w],{type:'text/javascript'}))});window._la=1}
- const ar=await Archive.open(f),list=await ar.getFilesArray();
- list.forEach(({file,path})=>{const n=file.name||'',ext=n.split('.').pop().toLowerCase();if(ext!=='ydd'&&ext!=='ytd')return;
-  addE({path:f.name+'/'+path+n,name:n,ext,get:async()=>(await file.extract()).arrayBuffer()})});
+ const B='https://cdn.jsdelivr.net/npm/7z-wasm@1.2.0/';
+ const SZ=(await import(B+'7zz.es6.js')).default;
+ const sz=await SZ({locateFile:n=>B+n});
+ const FS=sz.FS;
+ FS.writeFile('/in_archive',new Uint8Array(await f.arrayBuffer()));
+ try{sz.callMain(['x','/in_archive','-o/out','-y'])}catch(e){}
+ const files=[];
+ const walkFS=d=>{for(const n of FS.readdir(d)){if(n==='.'||n==='..')continue;const p=d+'/'+n;FS.isDir(FS.stat(p).mode)?walkFS(p):files.push(p)}};
+ try{walkFS('/out')}catch(e){throw Error('แตกไฟล์ไม่สำเร็จ')}
+ files.forEach(p=>{const n=p.split('/').pop(),ext=n.split('.').pop().toLowerCase();if(ext!=='ydd'&&ext!=='ytd')return;
+  const d=FS.readFile(p);addE({path:f.name+p.slice(4),name:n,ext,get:async()=>d.buffer.slice(d.byteOffset,d.byteOffset+d.byteLength)})});
 }
 $('#clr').onclick=()=>{lib.ydd=[];lib.ytd=[];curM=null;texs=[];meshes.forEach(x=>{root.remove(x);x.geometry.dispose()});meshes=[];if(mat.map){mat.map.dispose();mat.map=null;mat.needsUpdate=true}['#file','#dir'].forEach(s=>$(s).value='');$('#q').value='';$('#parts').innerHTML='';$('#tex').innerHTML='';$('#hud').textContent='';renderList();$('#drop').style.display='flex';log('ล้างแล้ว ลากไฟล์ใหม่มาวางได้เลย')};
 async function ingest(items){
@@ -210,7 +215,7 @@ async function ingest(items){
   const f=it.file,ext=f.name.split('.').pop().toLowerCase();
   if(ext==='ydd'||ext==='ytd')addE({path:it.path||f.name,name:f.name,ext,get:()=>f.arrayBuffer()});
   else if(ext==='zip'){try{await addZip(f)}catch(e){msgs.push('✖ '+f.name+': '+e.message)}}
-  else if(ext==='rar'||ext==='7z'){log('กำลังแตกไฟล์ '+f.name+' ...');try{await addArc(f)}catch(e){msgs.push('✖ '+f.name+': '+e.message+' (ลองแตกไฟล์เป็นโฟลเดอร์หรือ ZIP แทน)')}}
+  else if(ext==='rar'||ext==='7z'){log('กำลังแตกไฟล์ '+f.name+' ...');try{await Promise.race([addArc(f),new Promise((_,rj)=>setTimeout(()=>rj(Error('หมดเวลา 60 วินาที')),60000))])}catch(e){msgs.push('✖ '+f.name+': '+e.message+' (ลองแตกไฟล์เป็นโฟลเดอร์หรือ ZIP แทน)')}}
  }
  renderList();
  if(lib.ydd.length===1)openModel(lib.ydd[0]);
