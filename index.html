@@ -166,7 +166,7 @@ function showParts(){
   c.onchange=()=>{m.visible=c.checked;hud()};l.append(c,m.userData.name);box.append(l)});
 }
 const lib={ydd:[],ytd:[]};let curM=null;
-const keyOf=n=>{n=n.toLowerCase().replace(/\.[^.]+$/,'');const m=n.match(/^([a-z0-9_]+?)_(?:diff_)?(\d{3})(?:_|$)/);return m?m[1]+'_'+m[2]:n};
+const keyOf=n=>{n=n.toLowerCase().replace(/\.[^.]+$/,'');const m=n.match(/^((?:.*\^)?)([a-z0-9_]+?)_(?:diff_)?(\d{2,3})(?:_|$)/);return m?m[1]+m[2]+'_'+(+m[3]):n};
 function addE(e){e.key=keyOf(e.name);e.dir=e.path.replace(/[^/]*$/,'');const a=lib[e.ext];const k=a.findIndex(x=>x.path===e.path);k>=0?a[k]=e:a.push(e)}
 function texFor(m){let a=lib.ytd.filter(t=>t.key===m.key&&t.dir===m.dir);if(!a.length)a=lib.ytd.filter(t=>t.key===m.key);if(!a.length&&lib.ydd.length===1)a=lib.ytd;return a}
 function renderList(){
