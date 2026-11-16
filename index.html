@@ -14,6 +14,7 @@ h1{font-size:16px;margin:0}h2{font-size:12px;color:var(--mu);margin:8px 0 4px;te
 button,label.btn{background:var(--ac);color:#fff;border:0;border-radius:6px;padding:7px 10px;cursor:pointer;font:inherit;text-align:center}
 .row{display:flex;gap:6px;flex-wrap:wrap}.row label{display:flex;gap:4px;align-items:center}
 #log{font-size:12px;color:var(--mu);white-space:pre-wrap}
+#list{max-height:230px;overflow:auto;border:1px solid var(--bd);border-radius:6px}#list div{padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--bd);font-size:13px}#list div.on{background:var(--ac);color:#fff}
 #tex{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 #tex div{border:2px solid var(--bd);border-radius:6px;cursor:pointer;padding:2px;font-size:10px;word-break:break-all;color:var(--mu)}
 #tex div.on{border-color:var(--ac)}#tex canvas{width:100%;display:block;background:#888}
@@ -26,15 +27,16 @@ button,label.btn{background:var(--ac);color:#fff;border:0;border-radius:6px;padd
 <div id="app">
  <div id="side">
   <h1>FiveM Clothing Viewer</h1>
-  <label class="btn">เลือกไฟล์ .ydd / .ytd<input id="file" type="file" multiple accept=".ydd,.ytd" hidden></label>
-  <div class="row"><label><input type="checkbox" id="wf"> Wireframe</label><label><input type="checkbox" id="gr" checked> Grid</label><button id="rs">รีเซ็ตกล้อง</button></div>
-  <h2>Models (.ydd)</h2><div id="parts" class="row" style="flex-direction:column"></div>
+  <div class="row"><label class="btn">เลือกไฟล์ / ZIP<input id="file" type="file" multiple accept=".ydd,.ytd,.zip,.rar,.7z" hidden></label><label class="btn">เลือกโฟลเดอร์<input id="dir" type="file" webkitdirectory hidden></label></div>
+  <div class="row"><label><input type="checkbox" id="wf"> Wireframe</label><label><input type="checkbox" id="gr" checked> Grid</label><button id="rs">รีเซ็ตกล้อง</button><button id="clr" style="background:#dc2626">ล้างทั้งหมด</button></div>
+  <h2>ชุดทั้งหมด <span id="cnt"></span></h2><input id="q" placeholder="ค้นหา..." style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx)"><div id="list"></div><h2>Parts</h2><div id="parts" class="row" style="flex-direction:column"></div>
   <h2>Textures (.ytd)</h2><div id="tex"></div>
   <div id="log">ลากไฟล์มาวางได้ทั้งหน้า ไฟล์ไม่ถูกอัปโหลดออกจากเครื่อง</div>
  </div>
- <div id="view"><div id="hud"></div><div id="drop">ลากไฟล์ .ydd และ .ytd มาวางที่นี่</div></div>
+ <div id="view"><div id="hud"></div><div id="drop">ลากโฟลเดอร์ ไฟล์ ZIP หรือไฟล์ .ydd/.ytd มาวางที่นี่</div></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
 <script>
 const $=s=>document.querySelector(s),log=t=>$('#log').textContent=t;
 // ---------- RSC7 ----------
@@ -163,24 +165,71 @@ function showParts(){
  meshes.forEach((m,i)=>{const l=document.createElement('label'),c=document.createElement('input');c.type='checkbox';c.checked=true;
   c.onchange=()=>{m.visible=c.checked;hud()};l.append(c,m.userData.name);box.append(l)});
 }
-async function handle(files){
- $('#drop').style.display='none';const msgs=[];
- for(const f of files){
-  const ext=f.name.split('.').pop().toLowerCase();
-  try{
-   const r=await load(await f.arrayBuffer());
-   if(ext==='ydd'){
-    meshes.forEach(m=>{root.remove(m);m.geometry.dispose()});meshes=[];
-    const gs=parseYDD(r);
-    gs.forEach(g=>{const m=new THREE.Mesh(g.G,mat);m.userData.name=g.name;root.add(m);meshes.push(m)});
-    showParts();hud();frame();msgs.push('✔ '+f.name+': '+gs.length+' geometry');
-    if(!gs.length)msgs.push('อ่านโมเดลไม่ได้ (โครงสร้างอาจเป็น Gen9)');
-   }else if(ext==='ytd'){texs=parseYTD(r);showTex();msgs.push('✔ '+f.name+': '+texs.length+' texture')}
-  }catch(e){msgs.push('✖ '+f.name+': '+e.message)}
- }
- log(msgs.join('\n'));
+const lib={ydd:[],ytd:[]};let curM=null;
+const keyOf=n=>{n=n.toLowerCase().replace(/\.[^.]+$/,'');const m=n.match(/^([a-z0-9_]+?)_(?:diff_)?(\d{3})(?:_|$)/);return m?m[1]+'_'+m[2]:n};
+function addE(e){e.key=keyOf(e.name);e.dir=e.path.replace(/[^/]*$/,'');const a=lib[e.ext];const k=a.findIndex(x=>x.path===e.path);k>=0?a[k]=e:a.push(e)}
+function texFor(m){let a=lib.ytd.filter(t=>t.key===m.key&&t.dir===m.dir);if(!a.length)a=lib.ytd.filter(t=>t.key===m.key);if(!a.length&&lib.ydd.length===1)a=lib.ytd;return a}
+function renderList(){
+ const q=$('#q').value.toLowerCase(),box=$('#list');box.innerHTML='';
+ [...lib.ydd].sort((a,b)=>a.path.localeCompare(b.path)).filter(m=>m.path.toLowerCase().includes(q)).forEach(m=>{
+  const d=document.createElement('div');d._m=m;d.textContent=m.name.replace(/\.ydd$/i,'')+'  🎨'+texFor(m).length;d.title=m.path;d.onclick=()=>openModel(m);if(m===curM)d.className='on';box.append(d)});
+ $('#cnt').textContent='('+lib.ydd.length+')';
 }
-$('#file').onchange=e=>handle([...e.target.files]);
+async function openModel(m){
+ curM=m;[...$('#list').children].forEach(d=>d.classList.toggle('on',d._m===m));log('กำลังโหลด '+m.name+' ...');
+ try{
+  const r=await load(await m.get());
+  meshes.forEach(x=>{root.remove(x);x.geometry.dispose()});meshes=[];
+  const gs=parseYDD(r);
+  gs.forEach(g=>{const x=new THREE.Mesh(g.G,mat);x.userData.name=g.name;root.add(x);meshes.push(x)});
+  showParts();hud();frame();
+  texs=[];
+  for(const t of texFor(m)){try{parseYTD(await load(await t.get())).forEach(x=>{x.name=t.name.replace(/\.ytd$/i,'')+(x.ok?'':' ✖');texs.push(x)})}catch(e){}}
+  showTex();
+  log(m.name+': '+gs.length+' geometry, '+texs.length+' texture'+(gs.length?'':'\nอ่านโมเดลไม่ได้ (อาจเป็น Gen9)'));
+ }catch(e){log('✖ '+m.name+': '+e.message)}
+}
+async function addZip(f){
+ const u8=new Uint8Array(await f.arrayBuffer()),names=[];
+ fflate.unzipSync(u8,{filter:z=>{if(/\.(ydd|ytd)$/i.test(z.name))names.push(z.name);return false}});
+ names.forEach(n=>addE({path:f.name+'/'+n,name:n.split('/').pop(),ext:n.split('.').pop().toLowerCase(),
+  get:async()=>{const d=fflate.unzipSync(u8,{filter:z=>z.name===n})[n];return d.buffer.slice(d.byteOffset,d.byteOffset+d.byteLength)}}));
+}
+async function addArc(f){
+ const B='https://cdn.jsdelivr.net/npm/libarchive.js@2.0.2/dist/';
+ const {Archive}=await import(B+'libarchive.js');
+ if(!window._la){const w=await (await fetch(B+'worker-bundle.js')).text();Archive.init({workerUrl:URL.createObjectURL(new Blob([w],{type:'text/javascript'}))});window._la=1}
+ const ar=await Archive.open(f),list=await ar.getFilesArray();
+ list.forEach(({file,path})=>{const n=file.name||'',ext=n.split('.').pop().toLowerCase();if(ext!=='ydd'&&ext!=='ytd')return;
+  addE({path:f.name+'/'+path+n,name:n,ext,get:async()=>(await file.extract()).arrayBuffer()})});
+}
+$('#clr').onclick=()=>{lib.ydd=[];lib.ytd=[];curM=null;texs=[];meshes.forEach(x=>{root.remove(x);x.geometry.dispose()});meshes=[];if(mat.map){mat.map.dispose();mat.map=null;mat.needsUpdate=true}['#file','#dir'].forEach(s=>$(s).value='');$('#q').value='';$('#parts').innerHTML='';$('#tex').innerHTML='';$('#hud').textContent='';renderList();$('#drop').style.display='flex';log('ล้างแล้ว ลากไฟล์ใหม่มาวางได้เลย')};
+async function ingest(items){
+ $('#drop').style.display='none';const msgs=[];
+ for(const it of items){
+  const f=it.file,ext=f.name.split('.').pop().toLowerCase();
+  if(ext==='ydd'||ext==='ytd')addE({path:it.path||f.name,name:f.name,ext,get:()=>f.arrayBuffer()});
+  else if(ext==='zip'){try{await addZip(f)}catch(e){msgs.push('✖ '+f.name+': '+e.message)}}
+  else if(ext==='rar'||ext==='7z'){log('กำลังแตกไฟล์ '+f.name+' ...');try{await addArc(f)}catch(e){msgs.push('✖ '+f.name+': '+e.message+' (ลองแตกไฟล์เป็นโฟลเดอร์หรือ ZIP แทน)')}}
+ }
+ renderList();
+ if(lib.ydd.length===1)openModel(lib.ydd[0]);
+ else if(curM&&items.some(i=>/\.ytd$/i.test(i.file.name)))openModel(curM);
+ msgs.push(lib.ydd.length+' โมเดล / '+lib.ytd.length+' texture');
+ if(lib.ydd.length!==1||msgs.length>1)log(msgs.join('\n'));
+}
+async function walk(en,out){
+ if(en.isFile){if(/\.(ydd|ytd|zip|rar|7z)$/i.test(en.name)){const f=await new Promise(r=>en.file(r));out.push({file:f,path:en.fullPath.replace(/^\//,'')})}}
+ else{const rd=en.createReader();let all=[],b;do{b=await new Promise(r=>rd.readEntries(r));all.push(...b)}while(b.length);for(const c of all)await walk(c,out)}
+}
+$('#file').onchange=e=>ingest([...e.target.files].map(f=>({file:f})));
+$('#dir').onchange=e=>ingest([...e.target.files].map(f=>({file:f,path:f.webkitRelativePath})));
+$('#q').oninput=renderList;
 addEventListener('dragover',e=>e.preventDefault());
-addEventListener('drop',e=>{e.preventDefault();handle([...e.dataTransfer.files])});
+addEventListener('drop',async e=>{
+ e.preventDefault();
+ const ens=[...e.dataTransfer.items].map(i=>i.webkitGetAsEntry?i.webkitGetAsEntry():null),fl=[...e.dataTransfer.files];
+ if(ens.some(Boolean)){const out=[];for(const en of ens)if(en)await walk(en,out);ingest(out)}
+ else ingest(fl.map(f=>({file:f})));
+});
 </script></body></html>
